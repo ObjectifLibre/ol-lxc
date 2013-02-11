@@ -244,7 +244,7 @@ download_centos()
     elif [ -n "SUDO_USER" ]; then
         HOMEDIR=$(getent passwd "$SUDO_USER" | cut -d: -f6)
         mv $INSTALL_ROOT$HOMEDIR/.rpmdb/* $INSTALL_ROOT/var/lib/rpm/
-        rm -rf $HOMEDIR
+        #rm -rf $INSTALL_ROOT$HOMEDIR
     fi
     rm -f $INSTALL_ROOT/var/lib/rpm/Name
 
