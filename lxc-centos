@@ -1,0 +1,451 @@
+#!/bin/bash
+#
+# template script for generating centos container for LXC
+#
+
+#
+# lxc: linux Container library
+
+# Authors:
+# From the fedora template:
+# Daniel Lezcano <daniel.lezcano@free.fr>
+# Ramez Hanna <rhanna@informatiq.org>
+#
+# Gauvain Pocentek <gauvain.pocentek@objectif-libre.com>
+
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+ # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+
+
+arch=$(arch)
+cache_base=/var/cache/lxc/centos
+default_path=/var/lib/lxc
+root_password=root
+
+if [ "$arch" = "i686" ]; then
+    arch=i386
+fi
+
+clean()
+{
+    if [ ! -e $cache ]; then
+        exit 0
+    fi
+
+    (
+        flock -x 200
+        if [ $? != 0 ]; then
+            echo "Cache repository is busy."
+            exit 1
+        fi
+
+        echo -n "Purging the download cache for centos-$release..."
+        rm --preserve-root --one-file-system -rf $cache && echo "Done." || exit 1
+
+        exit 0
+    ) 200>/var/lock/subsys/lxc-centos
+}
+
+configure_centos()
+{
+    mkdir -p $rootfs_path/selinux
+    echo 0 > $rootfs_path/selinux/enforce
+
+    cat <<EOF > ${rootfs_path}/etc/sysconfig/network-scripts/ifcfg-eth0
+DEVICE=eth0
+BOOTPROTO=dhcp
+ONBOOT=yes
+HOSTNAME=${name}
+NM_CONTROLLED=no
+TYPE=Ethernet
+EOF
+
+    cat <<EOF > ${rootfs_path}/etc/sysconfig/network
+NETWORKING=yes
+HOSTNAME=${name}
+EOF
+
+    cat <<EOF > $rootfs_path/etc/hosts
+127.0.0.1 localhost $name
+EOF
+
+    dev_path="${rootfs_path}/dev"
+    rm -rf $dev_path
+    mkdir -p $dev_path
+    mknod -m 666 ${dev_path}/null c 1 3
+    mknod -m 666 ${dev_path}/zero c 1 5
+    mknod -m 666 ${dev_path}/random c 1 8
+    mknod -m 666 ${dev_path}/urandom c 1 9
+    mkdir -m 755 ${dev_path}/pts
+    mkdir -m 1777 ${dev_path}/shm
+    mknod -m 666 ${dev_path}/tty c 5 0
+    mknod -m 666 ${dev_path}/tty0 c 4 0
+    mknod -m 666 ${dev_path}/tty1 c 4 1
+    mknod -m 666 ${dev_path}/tty2 c 4 2
+    mknod -m 666 ${dev_path}/tty3 c 4 3
+    mknod -m 666 ${dev_path}/tty4 c 4 4
+    mknod -m 600 ${dev_path}/console c 5 1
+    mknod -m 666 ${dev_path}/full c 1 7
+    mknod -m 600 ${dev_path}/initctl p
+    mknod -m 666 ${dev_path}/ptmx c 5 2
+
+    echo "setting root passwd to $root_password"
+    echo "root:$root_password" | chroot $rootfs_path chpasswd
+
+    touch ${rootfs_path}/etc/fstab
+
+    sed -i 's|.sbin.start_udev||' ${rootfs_path}/etc/rc.sysinit
+    sed -i 's|.sbin.start_udev||' ${rootfs_path}/etc/rc.d/rc.sysinit
+    # don't mount devpts, for pete's sake
+    sed -i 's/^.*dev.pts.*$/#\0/' ${rootfs_path}/etc/rc.sysinit
+    sed -i 's/^.*dev.pts.*$/#\0/' ${rootfs_path}/etc/rc.d/rc.sysinit
+
+    chroot ${rootfs_path} chkconfig udev-post off
+    chroot ${rootfs_path} chkconfig network on
+
+    cp -R ${rootfs_path}/etc/skel/. ${rootfs_path}/root/.
+
+    cp /etc/localtime ${rootfs_path}/etc/
+
+    return 0
+}
+
+copy_configuration()
+{
+    mkdir -p $config_path
+    grep -q "^lxc.rootfs" $config_path/config 2>/dev/null || echo "lxc.rootfs = $rootfs_path" >> $config_path/config
+    sed -i '/lxc.network.type/d' $config_path/config
+    cat <<EOF >> $config_path/config
+lxc.utsname = $name
+lxc.tty = 6
+lxc.pts = 1024
+lxc.mount = $config_path/fstab
+lxc.console = /var/log/lxc/$name.console
+
+# When using LXC with apparmor, uncomment the next line to run unconfined:
+#lxc.aa_profile = unconfined
+
+#cgroups
+lxc.cgroup.devices.deny = a
+# Allow to mknod all devices (but not using them)
+lxc.cgroup.devices.allow                = c *:* m
+lxc.cgroup.devices.allow                = b *:* m
+# /dev/console
+lxc.cgroup.devices.allow                = c 5:1 rwm
+# /dev/fuse
+lxc.cgroup.devices.allow                = c 10:229 rwm
+# /dev/null
+lxc.cgroup.devices.allow                = c 1:3 rwm
+# /dev/ptmx
+lxc.cgroup.devices.allow                = c 5:2 rwm
+# /dev/pts/*
+lxc.cgroup.devices.allow                = c 136:* rwm
+# /dev/random
+lxc.cgroup.devices.allow                = c 1:8 rwm
+# /dev/rtc
+lxc.cgroup.devices.allow                = c 254:0 rwm
+# /dev/tty
+lxc.cgroup.devices.allow                = c 5:0 rwm
+# /dev/urandom
+lxc.cgroup.devices.allow                = c 1:9 rwm
+# /dev/zero
+lxc.cgroup.devices.allow                = c 1:5 rwm
+
+lxc.network.type                        = veth
+lxc.network.flags                       = up
+lxc.network.hwaddr                      = $mac
+lxc.network.link                        = $bridge
+lxc.network.name                        = eth0
+
+EOF
+
+    cat <<EOF > $config_path/fstab
+proc            proc         proc    nodev,noexec,nosuid 0 0
+sysfs           sys          sysfs   defaults  0 0
+EOF
+    if [ $? -ne 0 ]; then
+        echo "Failed to add configuration"
+        return 1
+    fi
+
+    return 0
+}
+
+setup_repo()
+{
+    INSTALL_ROOT="$1"
+    mv $INSTALL_ROOT/etc/yum.repos.d/CentOS-Base.repo \
+        $INSTALL_ROOT/etc/yum.repos.d/CentOS-Base.repo.orig
+
+    cat > $INSTALL_ROOT/etc/yum.repos.d/CentOS-Base.repo << EOF
+[base]
+name=CentOS-$release - Base
+baseurl=$repo
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-6
+
+[updates]
+name=CentOS-$release - Updates
+baseurl=$repo
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-6
+EOF
+}
+
+download_centos()
+{
+    INSTALL_ROOT=$cache/partial
+    mkdir -p $INSTALL_ROOT
+    if [ $? -ne 0 ]; then
+        echo "Failed to create '$INSTALL_ROOT' directory"
+        return 1
+    fi
+
+    echo "Downloading centos minimal..."
+    YUM="yum --installroot $INSTALL_ROOT -y --nogpgcheck"
+    PKG_LIST="yum passwd dhclient vim-enhanced rsyslog"
+
+    # guess the centos release package name
+    pkg=$(curl $repo_pkgdir 2>/dev/null | sed -rn 's/.*(centos-release[^\<\>]+.rpm).*/\1/p')
+    if [ -z "$pkg" ]; then
+        echo "Could not find the centos-release package on $repo"
+        return 1
+    fi
+
+    RELEASE_URL="$repo_pkgdir$pkg"
+    echo "Fetching from $RELEASE_URL"
+    curl -f "$RELEASE_URL" > $INSTALL_ROOT/centos-release-$release.noarch.rpm
+
+    if [ $? -ne 0 ]; then
+        echo "Failed to download centos release rpm"
+        return 1
+    fi
+
+    mkdir -p $INSTALL_ROOT/var/lib/rpm
+    rpm --root $INSTALL_ROOT  --initdb
+    rpm --root $INSTALL_ROOT --nodeps -ivh $INSTALL_ROOT/centos-release-$release.noarch.rpm
+    rm $INSTALL_ROOT/centos-release-$release.noarch.rpm
+    setup_repo "$INSTALL_ROOT"
+    $YUM install $PKG_LIST
+    # workaround an annoying behaviour when creating the rpm database
+    if [ -d $INSTALL_ROOT/root/.rpmdb/ ]; then
+        mv $INSTALL_ROOT/root/.rpmdb/* $INSTALL_ROOT/var/lib/rpm/
+    elif [ -n "SUDO_USER" ]; then
+        HOMEDIR=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+        mv $INSTALL_ROOT$HOMEDIR/.rpmdb/* $INSTALL_ROOT/var/lib/rpm/
+        rm -rf $HOMEDIR
+    fi
+    rm -f $INSTALL_ROOT/var/lib/rpm/Name
+
+    if [ $? -ne 0 ]; then
+        echo "Failed to download the rootfs, aborting."
+        return 1
+    fi
+
+    mv "$INSTALL_ROOT" "$cache/rootfs"
+    echo "Download complete."
+
+    return 0
+}
+
+copy_centos()
+{
+    echo "Copying rootfs to $rootfs_path ..."
+    mkdir -p $rootfs_path
+    rsync -Ha $cache/rootfs/ $rootfs_path
+    return 0
+}
+
+update_centos()
+{
+    YUM="yum --installroot $cache/rootfs -y --nogpgcheck"
+    $YUM update
+}
+
+install_centos()
+{
+    mkdir -p /var/lock/subsys/
+    (
+        flock -x 200
+        if [ $? -ne 0 ]; then
+            echo "Cache repository is busy."
+            return 1
+        fi
+
+        echo "Checking cache download in $cache/rootfs ... "
+        if [ ! -e "$cache/rootfs" ]; then
+            download_centos
+            if [ $? -ne 0 ]; then
+                echo "Failed to download 'centos base'"
+                return 1
+            fi
+        else
+            echo "Cache found. Updating..."
+            update_centos
+            if [ $? -ne 0 ]; then
+                echo "Failed to update 'centos base', continuing with last known good cache"
+            else
+                echo "Update finished"
+            fi
+        fi
+
+        echo "Copy $cache/rootfs to $rootfs_path ... "
+        copy_centos
+        if [ $? -ne 0 ]; then
+            echo "Failed to copy rootfs"
+            return 1
+        fi
+
+        return 0
+    ) 200>/var/lock/subsys/lxc-centos
+
+    return $?
+}
+
+usage()
+{
+    cat <<EOF
+usage:
+    $1 -n|--name=<container_name> -r|--release=<5|6>
+        [-a|--arch=<i386|x86_64>]
+        [-p|--path=<path>]
+        [-R|--repo=<repository_URL>]
+        [-m|--mac=<MAC>]
+        [-b|--bridge=<bridge>]
+        [-h|--help]
+Mandatory args:
+  -n,--name         container name, used to as an identifier for that container from now on
+  -r,--release      which release to install (5 or 6)
+Optional args:
+  -a,--arch         architecture of the container (i386 or x86_64), defaults to host architecture
+  -p,--path         path to where the container rootfs will be created, defaults to /var/lib/lxc.
+  -R,--repo         URL of the repository where rpm packages can be found, defaults to CentOS mirrors
+  -b,--bridge       name of the network bridge to be linked to
+  -m,--mac          MAC address of the virtual NIC
+  -h,--help         print this help
+EOF
+
+    return 0
+}
+
+options=$(getopt -o ha:p:n:r:R:b:m: -l help,arch:,path:,name:,release:,repo:,bridge:,mac: -- "$@")
+if [ $? -ne 0 ]; then
+    usage $(basename $0)
+    exit 1
+fi
+eval set -- "$options"
+
+while true; do
+    case "$1" in
+        -h|--help)      usage $0 && exit 0;;
+        -p|--path)      path=$2; shift 2;;
+        -n|--name)      name=$2; shift 2;;
+        -r|--release)   release=$2; shift 2;;
+        -R|--repo)      repo=$2; shift 2;;
+        -b|--bridge)    bridge=$2; shift 2;;
+        -m|--mac)       mac=$2; shift 2;;
+        --)             shift 1; break;;
+        *)              break;
+    esac
+done
+
+[ -z "$name" ] && usage $0 && exit 1
+[ -z "$release" ] && usage $0 && exit 1
+[ "$release" != "5" -a "$release" != "6" ] && usage $0 && exit 1
+[ "$arch" != "i386" -a "$arch" != "x86_64" ] && usage $0 && exit 1
+
+[ -z "$bridge" ] && bridge=br0
+[ -z "$mac" ] && mac="00:FF:00:00:00:01"
+
+needed_pkgs=""
+type yum >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+    needed_pkgs="yum $needed_pkgs"
+fi
+
+type curl >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+    needed_pkgs="curl $needed_pkgs"
+fi
+
+type rsync >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+    needed_pkgs="rsync $needed_pkgs"
+fi
+
+if [ -n "$needed_pkgs" ]; then
+    echo "Missing commands: $needed_pkgs"
+    echo "Please install these using \"sudo apt-get install $needed_pkgs\""
+    exit 1
+fi
+
+if [ -z "$path" ]; then
+    path=$default_path
+fi
+
+if [ -z "$repo" ]; then
+    repo="http://mirror.centos.org/centos-$release/$release/os/$arch"
+fi
+
+if [ "$release" = "5" ]; then
+    repo_pkgdir="$repo/CentOS/"
+elif [ "$release" = "6" ]; then
+    repo_pkgdir="$repo/Packages/"
+fi
+
+if [ "$(id -u)" != "0" ]; then
+    echo "This script should be run as 'root'"
+    exit 1
+fi
+
+rootfs_path=$path/rootfs
+if grep -q '^lxc.rootfs' $path/config 2>/dev/null ; then
+    rootfs_path=`grep 'lxc.rootfs =' $path/config | awk -F= '{ print $2 }'`
+fi
+config_path=$default_path/$name
+cache=$cache_base/$release/$arch
+
+revert()
+{
+    echo "Interrupted, so cleaning up"
+    lxc-destroy -n $name
+    # maybe was interrupted before copy config
+    rm -rf $path
+    rm -rf $default_path/$name
+    echo "exiting..."
+    exit 1
+}
+
+trap revert SIGHUP SIGINT SIGTERM
+
+copy_configuration
+if [ $? -ne 0 ]; then
+    echo "failed write configuration file"
+    exit 1
+fi
+
+install_centos
+if [ $? -ne 0 ]; then
+    echo "failed to install centos"
+    exit 1
+fi
+
+configure_centos
+if [ $? -ne 0 ]; then
+    echo "failed to configure centos for a container"
+    exit 1
+fi
+
+echo "container rootfs and config created"
+
