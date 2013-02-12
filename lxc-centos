@@ -204,6 +204,17 @@ download_centos()
         return 1
     fi
 
+    # check if we have a correct rpm config
+    macro=$(rpm -v --showrc | grep "\s_dbpath\s" | awk '{print $3}')
+    if [ "$macro" != "/var/lib/rpm" ]; then
+        echo
+        echo "Wrong value for %_dbpath macro."
+        echo "Please set this in ~/.rpmmacros:"
+        echo "%_dbpath /var/lib/rpm"
+        echo
+        return 1
+    fi
+
     echo "Downloading centos minimal..."
     YUM="yum --installroot $INSTALL_ROOT -y --nogpgcheck"
     PKG_LIST="yum passwd dhclient vim-enhanced rsyslog"
@@ -225,20 +236,14 @@ download_centos()
     fi
 
     mkdir -p $INSTALL_ROOT/var/lib/rpm
-    rpm --root $INSTALL_ROOT  --initdb
-    rpm --root $INSTALL_ROOT --nodeps -ivh $INSTALL_ROOT/centos-release-$release.noarch.rpm
+    rpm --root $INSTALL_ROOT  --initdb --dbpath /var/lib/rpm
+    rpm --root $INSTALL_ROOT --nodeps -ivh $INSTALL_ROOT/centos-release-$release.noarch.rpm --dbpath /var/lib/rpm
     rm $INSTALL_ROOT/centos-release-$release.noarch.rpm
     setup_repo "$INSTALL_ROOT"
     $YUM install $PKG_LIST
-    # workaround an annoying behaviour when creating the rpm database
-    if [ -d $INSTALL_ROOT/root/.rpmdb/ ]; then
-        mv $INSTALL_ROOT/root/.rpmdb/* $INSTALL_ROOT/var/lib/rpm/
-    elif [ -n "SUDO_USER" ]; then
-        HOMEDIR=$(getent passwd "$SUDO_USER" | cut -d: -f6)
-        mv $INSTALL_ROOT$HOMEDIR/.rpmdb/* $INSTALL_ROOT/var/lib/rpm/
-        #rm -rf $INSTALL_ROOT$HOMEDIR
-    fi
-    rm -f $INSTALL_ROOT/var/lib/rpm/Name
+    # fix a problematic version conflict
+    rm $INSTALL_ROOT/var/lib/rpm/Name
+    chroot $INSTALL_ROOT rpm --rebuilddb
 
     if [ $? -ne 0 ]; then
         echo "Failed to download the rootfs, aborting."
