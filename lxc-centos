@@ -125,13 +125,11 @@ copy_configuration()
 {
     mkdir -p $config_path
     grep -q "^lxc.rootfs" $config_path/config 2>/dev/null || echo "lxc.rootfs = $rootfs_path" >> $config_path/config
-    sed -i '/lxc.network.type/d' $config_path/config
     cat <<EOF >> $config_path/config
 lxc.utsname = $name
 lxc.tty = 6
 lxc.pts = 1024
 lxc.mount = $config_path/fstab
-lxc.console = /var/log/lxc/$name.console
 
 # When using LXC with apparmor, uncomment the next line to run unconfined:
 #lxc.aa_profile = unconfined
@@ -161,12 +159,6 @@ lxc.cgroup.devices.allow                = c 5:0 rwm
 lxc.cgroup.devices.allow                = c 1:9 rwm
 # /dev/zero
 lxc.cgroup.devices.allow                = c 1:5 rwm
-
-lxc.network.type                        = veth
-lxc.network.flags                       = up
-lxc.network.hwaddr                      = $mac
-lxc.network.link                        = $bridge
-lxc.network.name                        = eth0
 
 EOF
 
@@ -321,8 +313,6 @@ usage:
         [-a|--arch=<i386|x86_64>]
         [-p|--path=<path>]
         [-R|--repo=<repository_URL>]
-        [-m|--mac=<MAC>]
-        [-b|--bridge=<bridge>]
         [-h|--help]
 Mandatory args:
   -n,--name         container name, used to as an identifier for that container from now on
@@ -331,15 +321,13 @@ Optional args:
   -a,--arch         architecture of the container (i386 or x86_64), defaults to host architecture
   -p,--path         path to where the container rootfs will be created, defaults to /var/lib/lxc.
   -R,--repo         URL of the repository where rpm packages can be found, defaults to CentOS mirrors
-  -b,--bridge       name of the network bridge to be linked to
-  -m,--mac          MAC address of the virtual NIC
   -h,--help         print this help
 EOF
 
     return 0
 }
 
-options=$(getopt -o ha:p:n:r:R:b:m: -l help,arch:,path:,name:,release:,repo:,bridge:,mac: -- "$@")
+options=$(getopt -o ha:p:n:r:R: -l help,arch:,path:,name:,release:,repo: -- "$@")
 if [ $? -ne 0 ]; then
     usage $(basename $0)
     exit 1
@@ -353,8 +341,6 @@ while true; do
         -n|--name)      name=$2; shift 2;;
         -r|--release)   release=$2; shift 2;;
         -R|--repo)      repo=$2; shift 2;;
-        -b|--bridge)    bridge=$2; shift 2;;
-        -m|--mac)       mac=$2; shift 2;;
         --)             shift 1; break;;
         *)              break;
     esac
@@ -364,9 +350,6 @@ done
 [ -z "$release" ] && usage $0 && exit 1
 [ "$release" != "5" -a "$release" != "6" ] && usage $0 && exit 1
 [ "$arch" != "i386" -a "$arch" != "x86_64" ] && usage $0 && exit 1
-
-[ -z "$bridge" ] && bridge=br0
-[ -z "$mac" ] && mac="00:FF:00:00:00:01"
 
 needed_pkgs=""
 type yum >/dev/null 2>&1
