@@ -37,6 +37,8 @@ if [ "$arch" = "i686" ]; then
     arch=i386
 fi
 
+release=6
+
 clean()
 {
     if [ ! -e $cache ]; then
@@ -314,15 +316,16 @@ usage()
 {
     cat <<EOF
 usage:
-    $1 -n|--name=<container_name> -r|--release=<5|6>
+    $1 -n|--name=<container_name>
+        [-r|--release=<5|6>]
         [-a|--arch=<i386|x86_64>]
         [-p|--path=<path>]
         [-R|--repo=<repository_URL>]
         [-h|--help]
 Mandatory args:
   -n,--name         container name, used to as an identifier for that container from now on
-  -r,--release      which release to install (5 or 6)
 Optional args:
+  -r,--release      which release to install (5 or 6), defaults to 6
   -a,--arch         architecture of the container (i386 or x86_64), defaults to host architecture
   -p,--path         path to where the container rootfs will be created, defaults to /var/lib/lxc.
   -R,--repo         URL of the repository where rpm packages can be found, defaults to CentOS mirrors
