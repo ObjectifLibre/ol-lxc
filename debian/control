@@ -1,0 +1,13 @@
+Source: ol-lxc
+Priority: optional
+Section: admin
+Maintainer: Gauvain Pocentek <gauvain.pocentek@objectif-libre.com>
+Build-Depends: debhelper (>= 9)
+Standards-Version: 3.9.4
+
+Package: ol-lxc
+Architecture: all
+Depends: ${misc:Depends}, lxc, yum, curl, rsync
+Description: Objectif Libre LXC tools
+ This package provides tools for LXC:
+  - lxc-centos: LXC template to create a CentOS 5/6 container
