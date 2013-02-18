@@ -38,6 +38,7 @@ if [ "$arch" = "i686" ]; then
 fi
 
 release=6
+CUSTOM_REPO=0
 
 clean()
 {
@@ -178,6 +179,7 @@ EOF
 
 setup_repo()
 {
+    [ $CUSTOM_REPO -eq 0 ] && return
     INSTALL_ROOT="$1"
     mv $INSTALL_ROOT/etc/yum.repos.d/CentOS-Base.repo \
         $INSTALL_ROOT/etc/yum.repos.d/CentOS-Base.repo.orig
@@ -385,7 +387,9 @@ if [ -z "$path" ]; then
     path=$default_path
 fi
 
-if [ -z "$repo" ]; then
+if [ -n "$repo" ]; then
+    CUSTOM_REPO=1
+else
     repo="http://mirror.centos.org/centos-$release/$release/os/$arch"
 fi
 
