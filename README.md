@@ -34,5 +34,5 @@ Optional args:
 
 To create a CentOS 5 container using a local mirror:
 `````
-$ sudo lxc-create -n c1 -t centos -- -r 5 -R http://mirrors/centos/6/os/x86_64
+$ sudo lxc-create -n c1 -t centos -- -r 5 -R http://mirrors/centos/5/os/x86_64
 `````
